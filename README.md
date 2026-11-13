@@ -3,7 +3,7 @@
 寿命建模的真实业务分析小型项目。完整模拟客户、痛点、上下游、算法公式与一天工作剧本见 [BUSINESS.md](BUSINESS.md)。
 
 ## 模块与业务流程
-数据接入（JSON/CSV、字段验证、批次指纹）→ 参数化分析（异步 Python worker）→ 结果复核（指标、图形、明细、解释、批准）→ 定时分发（本地收件箱、CSV/JSON、SHA256）；另有业务总览和审计轨迹。
+数据接入（JSON/CSV、字段验证、批次指纹）→ 截止月样本归并（晚到归位、截止截断、冲突阻断、逐部件取舍留痕）→ 参数化分析（异步 Python worker，样本快照随任务留存）→ 结果复核（指标、图形、明细、解释、批准、失效标记）→ 定时分发（本地收件箱、CSV/JSON、SHA256）；另有业务总览和审计轨迹。
 三个贯穿全栈的实体：Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Audit、Delivery。
 
 ## 快速启动
@@ -29,7 +29,10 @@ Python 3.12 / FastAPI / SQLAlchemy / NumPy / SciPy / scikit-learn；PostgreSQL 1
 ## 目录与工程约定
 backend/src/{models,schemas,services,routes,controllers,middlewares,constants,config,utils}；backend/scripts/seed_demo.py；backend/migrations/initial.py。
 frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}。
-Role 枚举：admin/analyst/viewer；JobStatus：queued/running/completed/failed。后端 backend/src/constants/enums.py，前端 frontend/src/constants/enums.js；路由权限在 middlewares/auth.py；页面按相同角色控制操作入口。
+Role 枚举：admin/analyst/viewer；JobStatus：queued/running/completed/failed；Inclusion：included/superseded/excluded/conflict（样本取舍结论）。Job 另含 stale（源数据更新后旧估计失效）与 dataset_checksum（任务绑定的数据指纹）。后端 backend/src/constants/enums.py，前端 frontend/src/constants/enums.js；路由权限在 middlewares/auth.py；页面按相同角色控制操作入口。
+
+## 截止月样本口径
+原始记录支持 `observed_month`（YYYY-MM，可选，缺失时按批次来源文件名月份归位）。任务参数含 `cutoff_month` 评估截止月：同一资产取截止月内最新观测进入样本，更早观测标记 superseded；晚于截止月的记录标记 excluded 不参与；已失效后又报在役（revival）或里程倒退（mileage_regression）列入 conflicts 并在提交与计算两处阻止估计。样本快照（含逐资产 decisions 取舍依据）保存在 `job.result.sample_snapshot`，可通过 `GET /jobs/{id}/sample` 回看；工作台可用 `POST /jobs/preview` 试算口径而不建任务。接入新数据批次后，引用旧批次的任务自动置 `stale=true`（结果与快照不变，已批准简报仍可回看），重算时沿用任务原截止月。
 
 ## 环境变量与 Docker
 COMPOSE_PROJECT_NAME=fleet-weibull；FRONTEND_PORT=18216；BACKEND_PORT=19216；DB_PORT=17716；DB_PASSWORD、JWT_SECRET 见 .env.example；SEED_DEMO 默认 true。共享命名产物卷供后端下载与 worker 写入，数据库/Redis 各持久卷。
@@ -37,7 +40,8 @@ COMPOSE_PROJECT_NAME=fleet-weibull；FRONTEND_PORT=18216；BACKEND_PORT=19216；
 错误响应、请求编号、Redis 每 IP 每分钟 240 次限流、JWT 和数据库操作审计。演示密钥与密码仅供本机模拟；生产部署前配置独立密钥与账号。
 
 ## 数据与验收
-所有数据为固定随机种子生成的模拟业务数据，不能作为实际生产决策证据。项目独立算法、输入边界及业务局限详见 BUSINESS.md。测试与截图统一存放 ../../test-artifacts/gb-1017/，源码不含日志/截图/测试报告。
+所有数据为固定随机种子生成的模拟业务数据，不能作为实际生产决策证据。演示数据含 2026-06 至 2026-11 六个月跨月补报台账（1204 行，含晚到补报与截止月后补录）及一个冲突演示批次。项目独立算法、输入边界及业务局限详见 BUSINESS.md。
+单元与集成测试位于 `test-artifacts/gb-1017/tests/`（SQLite + FastAPI TestClient，无需 Docker）：`PYTHONPATH=backend python -m pytest test-artifacts/gb-1017/tests -q`；真实容器、权限、主流程与截图的结果统一记录在对应 `TESTING.md`，本说明不把未执行的检查写成通过。
 清理本项目演示数据：`docker compose down -v --remove-orphans`（会删除本项目命名卷）。
 
 ## License

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from src.config.database import get_db
 from src.models import Job
-from src.schemas.job import JobInput
+from src.schemas.job import JobInput, SamplePreviewInput
 from src.middlewares.auth import current_user, can_write, admin_only
 from src.services import jobs
 from src.services.audit import record
@@ -15,11 +15,22 @@ def listing(db=Depends(get_db),u=Depends(current_user)):
 def create(data:JobInput,db=Depends(get_db),u=Depends(can_write)):
     j=jobs.create(db,data,u); record(db,u.email,'job.create',{'id':j.id,'params':j.params})
     db.commit(); jobs.enqueue(j.id); return job_dict(j)
+@router.post('/preview')
+def preview(data:SamplePreviewInput,db=Depends(get_db),u=Depends(current_user)):
+    return jobs.preview(db,data.dataset_id,data.params)
 @router.get('/{id}')
 def detail(id:int,db=Depends(get_db),u=Depends(current_user)):
     j=db.get(Job,id)
     if not j: raise HTTPException(404,'分析任务不存在')
     return job_dict(j)
+@router.get('/{id}/sample')
+def sample(id:int,db=Depends(get_db),u=Depends(current_user)):
+    """回看任务当时使用的截止月样本与逐部件取舍依据（已批准简报同样可读）。"""
+    j=db.get(Job,id)
+    if not j: raise HTTPException(404,'分析任务不存在')
+    snapshot=(j.result or {}).get('sample_snapshot')
+    if not snapshot: raise HTTPException(404,'该任务没有留存样本快照')
+    return snapshot
 @router.post('/{id}/approve')
 def approve(id:int,db=Depends(get_db),u=Depends(admin_only)):
     j=db.get(Job,id)

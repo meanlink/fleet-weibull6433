@@ -5,7 +5,7 @@ from redis import Redis
 from src.config.database import Session
 from src.config.settings import REDIS_URL
 from src.models import Job, Dataset, Report
-from src.services.business import analyze
+from src.services.samples import run_analysis
 from src.services.reports import deliver
 from src.services.audit import record
 logging.basicConfig(level=logging.INFO)
@@ -16,10 +16,11 @@ def execute(job_id):
         j.status='running'; db.commit()
         try:
             d=db.get(Dataset,j.dataset_id)
-            result=analyze(d.records,j.params)
+            result=run_analysis(d.records,j.params,d.source)
             json.dumps(result,allow_nan=False)
             j.result=result;j.status='completed';j.finished_at=time.time()
-            record(db,'worker','job.completed',{'id':j.id})
+            j.dataset_checksum=d.checksum;j.stale=False
+            record(db,'worker','job.completed',{'id':j.id,'cutoff_month':j.params.get('cutoff_month')})
         except Exception as e:
             logging.exception('Analysis failed')
             j.status='failed';j.error=str(e)[:990];j.finished_at=time.time()
